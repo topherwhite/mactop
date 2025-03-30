@@ -114,6 +114,30 @@ var (
 		},
 		[]string{"type"}, // "used", "total", "swap_used", "swap_total"
 	)
+
+	networkActivity = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "mactop_network_activity_mb",
+			Help: "Network activity in MB/s",
+		},
+		[]string{"type"}, // "in", "out"
+	)
+
+	diskActivity = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "mactop_disk_activity_mb",
+			Help: "Disk activity in MB/s",
+		},
+		[]string{"type"}, // "read", "write"
+	)
+
+	sysStatus = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "mactop_system_status",
+			Help: "System Status",
+		},
+		[]string{"type"}, // "used", "total", "swap_used", "swap_total"
+	)
 )
 
 func startPrometheusServer(port string) {
@@ -123,6 +147,9 @@ func startPrometheusServer(port string) {
 	registry.MustRegister(gpuFreqMHz)
 	registry.MustRegister(powerUsage)
 	registry.MustRegister(memoryUsage)
+	registry.MustRegister(networkActivity)
+	registry.MustRegister(diskActivity)
+	registry.MustRegister(sysStatus)
 
 	handler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
 
@@ -1046,15 +1073,18 @@ func main() {
 		for {
 			select {
 			case cpuMetrics := <-cpuMetricsChan:
-				updateCPUUI(cpuMetrics)
-				updateTotalPowerChart(cpuMetrics.PackageW)
-				ui.Render(grid)
+				//updateCPUUI(cpuMetrics)
+				updateCPUPrometheus(cpuMetrics)
+				// updateTotalPowerChart(cpuMetrics.PackageW)
+				// ui.Render(grid)
 			case gpuMetrics := <-gpuMetricsChan:
-				updateGPUUI(gpuMetrics)
-				ui.Render(grid)
+				//updateGPUUI(gpuMetrics)
+				updateGPUPrometheus(gpuMetrics)
+				//ui.Render(grid)
 			case netdiskMetrics := <-netdiskMetricsChan:
-				updateNetDiskUI(netdiskMetrics)
-				ui.Render(grid)
+				//updateNetDiskUI(netdiskMetrics)
+				updateNetDiskPrometheus(netdiskMetrics)
+				//ui.Render(grid)
 			case <-ticker.C:
 				percentages, err := GetCPUPercentages()
 				if err != nil {
@@ -1074,7 +1104,7 @@ func main() {
 					cpuCoreWidget.pCoreCount,
 					totalUsage,
 				)
-				updateProcessList()
+				//updateProcessList()
 				ui.Render(grid)
 			case <-done:
 				return
@@ -1405,6 +1435,23 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	memoryGauge.Title = fmt.Sprintf("Memory Usage: %.2f GB / %.2f GB (Swap: %.2f/%.2f GB)", float64(memoryMetrics.Used)/1024/1024/1024, float64(memoryMetrics.Total)/1024/1024/1024, float64(memoryMetrics.SwapUsed)/1024/1024/1024, float64(memoryMetrics.SwapTotal)/1024/1024/1024)
 	memoryGauge.Percent = int((float64(memoryMetrics.Used) / float64(memoryMetrics.Total)) * 100)
 
+}
+
+func updateCPUPrometheus(cpuMetrics CPUMetrics) {
+	coreUsages, err := GetCPUPercentages()
+	if err != nil {
+		stderrLogger.Printf("Error getting CPU percentages: %v\n", err)
+		return
+	}
+	cpuCoreWidget.UpdateUsage(coreUsages)
+	var totalUsage float64
+	for _, usage := range coreUsages {
+		totalUsage += usage
+	}
+	totalUsage /= float64(len(coreUsages))
+
+	memoryMetrics := getMemoryMetrics()
+
 	cpuUsage.Set(float64(totalUsage))
 	powerUsage.With(prometheus.Labels{"component": "cpu"}).Set(cpuMetrics.CPUW)
 	powerUsage.With(prometheus.Labels{"component": "total"}).Set(cpuMetrics.PackageW)
@@ -1414,6 +1461,11 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	memoryUsage.With(prometheus.Labels{"type": "total"}).Set(float64(memoryMetrics.Total) / 1024 / 1024 / 1024)
 	memoryUsage.With(prometheus.Labels{"type": "swap_used"}).Set(float64(memoryMetrics.SwapUsed) / 1024 / 1024 / 1024)
 	memoryUsage.With(prometheus.Labels{"type": "swap_total"}).Set(float64(memoryMetrics.SwapTotal) / 1024 / 1024 / 1024)
+
+	sysStatus.With(prometheus.Labels{"type": "p_cores"}).Set(float64(cpuCoreWidget.pCoreCount))
+	sysStatus.With(prometheus.Labels{"type": "e_cores"}).Set(float64(cpuCoreWidget.eCoreCount))
+	sysStatus.With(prometheus.Labels{"type": "is_throttled"}).Set(map[bool]float64{true:1,false:0}[cpuMetrics.Throttled])
+
 }
 
 func updateGPUUI(gpuMetrics GPUMetrics) {
@@ -1444,8 +1496,14 @@ func updateGPUUI(gpuMetrics GPUMetrics) {
 	gpuSparkline.MaxVal = 100 // GPU usage is 0-100%
 	gpuSparklineGroup.Title = fmt.Sprintf("GPU History: %d%% (Avg: %.1f%%)", gpuMetrics.Active, avgGPU)
 
+}
+
+func updateGPUPrometheus(gpuMetrics GPUMetrics) {
+
 	gpuUsage.Set(float64(gpuMetrics.Active))
 	gpuFreqMHz.Set(float64(gpuMetrics.FreqMHz))
+	gpus_cnt, _ := strconv.ParseUint(getGPUCores(), 10, 32)
+	sysStatus.With(prometheus.Labels{"type": "g_cores"}).Set(float64(gpus_cnt))
 }
 
 func getDiskStorage() (total, used, available string) {
@@ -1495,6 +1553,13 @@ func formatGigabytes(bytes float64) string {
 func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 	total, used, available := getDiskStorage()
 	NetworkInfo.Text = fmt.Sprintf("Out: %.1f p/s, %.1f KB/s\n"+"In: %.1f p/s, %.1f KB/s\n"+"Read: %.1f ops/s, %.1f KB/s\n"+"Write: %.1f ops/s, %.1f KB/s\n"+"%s U / %s T / %s A", netdiskMetrics.OutPacketsPerSec, netdiskMetrics.OutBytesPerSec, netdiskMetrics.InPacketsPerSec, netdiskMetrics.InBytesPerSec, netdiskMetrics.ReadOpsPerSec, netdiskMetrics.ReadKBytesPerSec, netdiskMetrics.WriteOpsPerSec, netdiskMetrics.WriteKBytesPerSec, used, total, available)
+}
+
+func updateNetDiskPrometheus(netdiskMetrics NetDiskMetrics) {
+	networkActivity.With(prometheus.Labels{"type": "in"}).Set(float64( ( netdiskMetrics.InBytesPerSec * 1000 ) / ( 1024 * 1024 ) ))
+	networkActivity.With(prometheus.Labels{"type": "out"}).Set(float64( ( netdiskMetrics.OutBytesPerSec * 1000 ) / ( 1024 * 1024 ) ))
+	diskActivity.With(prometheus.Labels{"type": "read"}).Set(float64( ( netdiskMetrics.ReadKBytesPerSec * 1000 ) / ( 1024 * 1024 ) ))
+	diskActivity.With(prometheus.Labels{"type": "write"}).Set(float64( ( netdiskMetrics.WriteKBytesPerSec * 1000 ) / ( 1024 * 1024 ) ))
 }
 
 func parseCPUMetrics(data map[string]interface{}, cpuMetrics CPUMetrics) CPUMetrics {
