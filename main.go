@@ -81,14 +81,6 @@ var (
 		},
 	)
 
-	powerUsage = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "mactop_power_watts",
-			Help: "Current power usage in watts",
-		},
-		[]string{"component"}, // "cpu", "gpu", "total"
-	)
-
 	memoryUsage = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "mactop_memory_gb",
@@ -129,7 +121,6 @@ func startPrometheusServer(port string) {
 	registry.MustRegister(pCoreUsage)
 	registry.MustRegister(gpuUsage)
 	registry.MustRegister(gpuFreqMHz)
-	registry.MustRegister(powerUsage)
 	registry.MustRegister(memoryUsage)
 	registry.MustRegister(networkActivity)
 	registry.MustRegister(diskActivity)
@@ -585,10 +576,6 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 	// Log the CPU usage values
 	stderrLogger.Printf("CPU Usage - Total: %.2f%%, E-cores: %.2f%%, P-cores: %.2f%%", 
 		totalUsage, eCoreTotal, pCoreTotal)
-	
-	powerUsage.With(prometheus.Labels{"component": "cpu"}).Set(cpuMetrics.CPUW)
-	powerUsage.With(prometheus.Labels{"component": "total"}).Set(cpuMetrics.PackageW)
-	powerUsage.With(prometheus.Labels{"component": "gpu"}).Set(cpuMetrics.GPUW)
 
 	memoryUsage.With(prometheus.Labels{"type": "used"}).Set(float64(memoryMetrics.Used) / 1024 / 1024 / 1024)
 	memoryUsage.With(prometheus.Labels{"type": "total"}).Set(float64(memoryMetrics.Total) / 1024 / 1024 / 1024)
