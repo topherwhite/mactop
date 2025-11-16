@@ -172,7 +172,21 @@ func main() {
 		}
 	}
 
+	// Get CPU name to detect Ultra chips
+	cpuName := ""
+	for _, line := range lines {
+		if strings.Contains(line, "machdep.cpu.brand_string:") {
+			parts := strings.Split(line, ":")
+			if len(parts) > 1 {
+				cpuName = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	isUltra := strings.Contains(cpuName, "Ultra")
+
 	fmt.Printf("\n=== Interpretation ===\n")
+	fmt.Printf("CPU: %s\n", cpuName)
+	fmt.Printf("Is Ultra chip: %v\n", isUltra)
 	fmt.Printf("perflevel0: %s cores (%d logical CPUs)\n", perfLevel0Name, perfLevel0)
 	fmt.Printf("perflevel1: %s cores (%d logical CPUs)\n", perfLevel1Name, perfLevel1)
 
@@ -208,42 +222,85 @@ func main() {
 	if perfLevel0Name == "Performance" && perfLevel1Name == "Efficiency" {
 		fmt.Printf("System has %d P-cores (Performance) and %d E-cores (Efficiency)\n",
 			perfLevel0, perfLevel1)
-		fmt.Println("\nCommon orderings on Apple Silicon:")
-		fmt.Println("  Option 1: P-cores FIRST (cores 0-9), then E-cores (cores 10-13)")
-		fmt.Printf("  Option 2: E-cores FIRST (cores 0-%d), then P-cores (cores %d-%d)\n",
-			perfLevel1-1, perfLevel1, perfLevel1+perfLevel0-1)
 
-		// Try to determine which is correct
-		avgFirst := 0.0
-		avgSecond := 0.0
+		if isUltra {
+			fmt.Println("\n*** ULTRA CHIP DETECTED ***")
+			fmt.Println("Ultra chips have two dies fused together.")
+			pCoresPerDie := perfLevel0 / 2
+			eCoresPerDie := perfLevel1 / 2
+			fmt.Printf("Expected pattern (2 dies, %d P-cores + %d E-cores per die):\n",
+				pCoresPerDie, eCoresPerDie)
+			fmt.Printf("  Die 1: P-cores at indices 0-%d, E-cores at indices %d-%d\n",
+				pCoresPerDie-1, pCoresPerDie, pCoresPerDie+eCoresPerDie-1)
+			die2PStart := pCoresPerDie + eCoresPerDie
+			die2PEnd := die2PStart + pCoresPerDie - 1
+			die2EStart := die2PEnd + 1
+			die2EEnd := die2EStart + eCoresPerDie - 1
+			fmt.Printf("  Die 2: P-cores at indices %d-%d, E-cores at indices %d-%d\n",
+				die2PStart, die2PEnd, die2EStart, die2EEnd)
 
-		if len(currentUsage) >= perfLevel0 {
-			for i := 0; i < perfLevel0; i++ {
-				avgFirst += currentUsage[i]
+			// Analyze each die's pattern
+			if len(currentUsage) >= perfLevel0+perfLevel1 {
+				fmt.Println("\nDie 1 analysis:")
+				die1PAvg := 0.0
+				for i := 0; i < pCoresPerDie; i++ {
+					die1PAvg += currentUsage[i]
+				}
+				die1PAvg /= float64(pCoresPerDie)
+				fmt.Printf("  Die 1 P-cores (0-%d) average: %.2f%%\n", pCoresPerDie-1, die1PAvg)
+
+				die1EAvg := 0.0
+				for i := pCoresPerDie; i < pCoresPerDie+eCoresPerDie; i++ {
+					die1EAvg += currentUsage[i]
+				}
+				die1EAvg /= float64(eCoresPerDie)
+				fmt.Printf("  Die 1 E-cores (%d-%d) average: %.2f%%\n",
+					pCoresPerDie, pCoresPerDie+eCoresPerDie-1, die1EAvg)
+
+				fmt.Println("\nDie 2 analysis:")
+				die2PAvg := 0.0
+				for i := die2PStart; i <= die2PEnd && i < len(currentUsage); i++ {
+					die2PAvg += currentUsage[i]
+				}
+				die2PAvg /= float64(pCoresPerDie)
+				fmt.Printf("  Die 2 P-cores (%d-%d) average: %.2f%%\n", die2PStart, die2PEnd, die2PAvg)
+
+				die2EAvg := 0.0
+				for i := die2EStart; i <= die2EEnd && i < len(currentUsage); i++ {
+					die2EAvg += currentUsage[i]
+				}
+				die2EAvg /= float64(eCoresPerDie)
+				fmt.Printf("  Die 2 E-cores (%d-%d) average: %.2f%%\n", die2EStart, die2EEnd, die2EAvg)
 			}
-			avgFirst /= float64(perfLevel0)
-		}
+		} else {
+			fmt.Println("\nNon-Ultra chip detected.")
+			fmt.Println("Expected orderings on Apple Silicon:")
+			fmt.Printf("  Most common: P-cores FIRST (cores 0-%d), then E-cores (cores %d-%d)\n",
+				perfLevel0-1, perfLevel0, perfLevel0+perfLevel1-1)
 
-		if len(currentUsage) >= perfLevel0+perfLevel1 {
-			for i := perfLevel0; i < perfLevel0+perfLevel1; i++ {
-				avgSecond += currentUsage[i]
+			// Analyze pattern
+			if len(currentUsage) >= perfLevel0+perfLevel1 {
+				pCoreAvg := 0.0
+				for i := 0; i < perfLevel0; i++ {
+					pCoreAvg += currentUsage[i]
+				}
+				pCoreAvg /= float64(perfLevel0)
+
+				eCoreAvg := 0.0
+				for i := perfLevel0; i < perfLevel0+perfLevel1; i++ {
+					eCoreAvg += currentUsage[i]
+				}
+				eCoreAvg /= float64(perfLevel1)
+
+				fmt.Printf("\nP-cores (0-%d) average: %.2f%%\n", perfLevel0-1, pCoreAvg)
+				fmt.Printf("E-cores (%d-%d) average: %.2f%%\n", perfLevel0, perfLevel0+perfLevel1-1, eCoreAvg)
 			}
-			avgSecond /= float64(perfLevel1)
 		}
-
-		fmt.Printf("\nAverage usage of first %d cores: %.2f%%\n", perfLevel0, avgFirst)
-		fmt.Printf("Average usage of next %d cores: %.2f%%\n", perfLevel1, avgSecond)
-
-		fmt.Println("\n=== Current Code Assumption ===")
-		fmt.Printf("The code in main.go:551-566 currently assumes:\n")
-		fmt.Printf("  - E-cores are at indices 0-%d\n", perfLevel1-1)
-		fmt.Printf("  - P-cores are at indices %d-%d\n", perfLevel1, perfLevel1+perfLevel0-1)
-		fmt.Println("\nThis is likely INCORRECT if P-cores come first in the array!")
 	}
 
-	fmt.Println("\n=== Recommendation ===")
-	fmt.Println("To properly fix this, we need to:")
-	fmt.Println("1. Determine the actual core ordering (likely P-cores first)")
-	fmt.Println("2. Update the loop indices in updateCPUPrometheus() accordingly")
-	fmt.Println("3. Consider using sysctl hw.perflevels to verify core types")
+	fmt.Println("\n=== Implementation Status ===")
+	fmt.Println("The main.go code now handles both Ultra and non-Ultra chips:")
+	fmt.Println("  - Non-Ultra: P-cores first (indices 0 to P-1), E-cores second (indices P to P+E-1)")
+	fmt.Println("  - Ultra: Die1 P-cores, Die1 E-cores, Die2 P-cores, Die2 E-cores")
+	fmt.Println("\nThe fix properly calculates separate averages for P-cores and E-cores.")
 }

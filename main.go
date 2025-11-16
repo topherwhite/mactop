@@ -533,39 +533,91 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 	appleSiliconModel := getSOCInfo()
 	eCoreCount, _ := appleSiliconModel["e_core_count"].(int)
 	pCoreCount, _ := appleSiliconModel["p_core_count"].(int)
-	
-	stderrLogger.Printf("Core configuration - P-cores: %d (indices 0-%d), E-cores: %d (indices %d-%d), Total cores: %d",
-		pCoreCount, pCoreCount-1, eCoreCount, pCoreCount, pCoreCount+eCoreCount-1, len(coreUsages))
-	
+	isUltra, _ := appleSiliconModel["is_ultra"].(bool)
+
 	// Calculate average for all cores
 	var totalUsage float64
 	for _, usage := range coreUsages {
 		totalUsage += usage
 	}
 	totalUsage /= float64(len(coreUsages))
-	
-	// Calculate average for P-cores (Performance cores)
-	// On Apple Silicon, P-cores come FIRST in the CPU usage array
+
 	var pCoreTotal float64
-	if pCoreCount > 0 {
-		stderrLogger.Printf("P-cores usage values:")
-		for i := 0; i < pCoreCount && i < len(coreUsages); i++ {
+	var eCoreTotal float64
+
+	if isUltra {
+		// Ultra chips have two dies fused together
+		// Pattern: Die1_P-cores, Die1_E-cores, Die2_P-cores, Die2_E-cores
+		pCoresPerDie := pCoreCount / 2
+		eCoresPerDie := eCoreCount / 2
+
+		stderrLogger.Printf("Ultra chip detected - P-cores: %d (%d per die), E-cores: %d (%d per die), Total cores: %d",
+			pCoreCount, pCoresPerDie, eCoreCount, eCoresPerDie, len(coreUsages))
+
+		// Die 1: P-cores
+		stderrLogger.Printf("Die 1 P-cores (indices 0-%d):", pCoresPerDie-1)
+		for i := 0; i < pCoresPerDie && i < len(coreUsages); i++ {
 			stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
 			pCoreTotal += coreUsages[i]
 		}
-		pCoreTotal /= float64(pCoreCount)
-	}
 
-	// Calculate average for E-cores (Efficiency cores)
-	// E-cores come AFTER P-cores in the CPU usage array
-	var eCoreTotal float64
-	if eCoreCount > 0 {
-		stderrLogger.Printf("E-cores usage values:")
-		for i := pCoreCount; i < pCoreCount+eCoreCount && i < len(coreUsages); i++ {
-			stderrLogger.Printf("  E-core %d: %.2f%%", i-pCoreCount, coreUsages[i])
+		// Die 1: E-cores
+		die1EStart := pCoresPerDie
+		die1EEnd := die1EStart + eCoresPerDie
+		stderrLogger.Printf("Die 1 E-cores (indices %d-%d):", die1EStart, die1EEnd-1)
+		for i := die1EStart; i < die1EEnd && i < len(coreUsages); i++ {
+			stderrLogger.Printf("  E-core %d: %.2f%%", i-die1EStart, coreUsages[i])
 			eCoreTotal += coreUsages[i]
 		}
-		eCoreTotal /= float64(eCoreCount)
+
+		// Die 2: P-cores
+		die2PStart := die1EEnd
+		die2PEnd := die2PStart + pCoresPerDie
+		stderrLogger.Printf("Die 2 P-cores (indices %d-%d):", die2PStart, die2PEnd-1)
+		for i := die2PStart; i < die2PEnd && i < len(coreUsages); i++ {
+			stderrLogger.Printf("  P-core %d: %.2f%%", i-die2PStart+pCoresPerDie, coreUsages[i])
+			pCoreTotal += coreUsages[i]
+		}
+
+		// Die 2: E-cores
+		die2EStart := die2PEnd
+		die2EEnd := die2EStart + eCoresPerDie
+		stderrLogger.Printf("Die 2 E-cores (indices %d-%d):", die2EStart, die2EEnd-1)
+		for i := die2EStart; i < die2EEnd && i < len(coreUsages); i++ {
+			stderrLogger.Printf("  E-core %d: %.2f%%", i-die2EStart+eCoresPerDie, coreUsages[i])
+			eCoreTotal += coreUsages[i]
+		}
+
+		if pCoreCount > 0 {
+			pCoreTotal /= float64(pCoreCount)
+		}
+		if eCoreCount > 0 {
+			eCoreTotal /= float64(eCoreCount)
+		}
+	} else {
+		// Non-Ultra chips: P-cores come first, then E-cores
+		stderrLogger.Printf("Core configuration - P-cores: %d (indices 0-%d), E-cores: %d (indices %d-%d), Total cores: %d",
+			pCoreCount, pCoreCount-1, eCoreCount, pCoreCount, pCoreCount+eCoreCount-1, len(coreUsages))
+
+		// Calculate average for P-cores (Performance cores)
+		if pCoreCount > 0 {
+			stderrLogger.Printf("P-cores usage values:")
+			for i := 0; i < pCoreCount && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
+				pCoreTotal += coreUsages[i]
+			}
+			pCoreTotal /= float64(pCoreCount)
+		}
+
+		// Calculate average for E-cores (Efficiency cores)
+		if eCoreCount > 0 {
+			stderrLogger.Printf("E-cores usage values:")
+			for i := pCoreCount; i < pCoreCount+eCoreCount && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  E-core %d: %.2f%%", i-pCoreCount, coreUsages[i])
+				eCoreTotal += coreUsages[i]
+			}
+			eCoreTotal /= float64(eCoreCount)
+		}
 	}
 
 	memoryMetrics := getMemoryMetrics()
@@ -704,8 +756,13 @@ func getSOCInfo() map[string]interface{} {
 	if val, ok := coreCountsDict["hw.perflevel0.logicalcpu"]; ok {
 		pCoreCounts = val
 	}
+
+	// Detect if this is an Ultra chip (two dies fused together)
+	cpuName := cpuInfoDict["machdep.cpu.brand_string"]
+	isUltra := strings.Contains(cpuName, "Ultra")
+
 	socInfo := map[string]interface{}{
-		"name":           cpuInfoDict["machdep.cpu.brand_string"],
+		"name":           cpuName,
 		"core_count":     cpuInfoDict["machdep.cpu.core_count"],
 		"cpu_max_power":  nil,
 		"gpu_max_power":  nil,
@@ -714,6 +771,7 @@ func getSOCInfo() map[string]interface{} {
 		"e_core_count":   eCoreCounts,
 		"p_core_count":   pCoreCounts,
 		"gpu_core_count": getGPUCores(),
+		"is_ultra":       isUltra,
 	}
 	return socInfo
 }
