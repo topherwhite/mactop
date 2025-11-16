@@ -534,8 +534,8 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 	eCoreCount, _ := appleSiliconModel["e_core_count"].(int)
 	pCoreCount, _ := appleSiliconModel["p_core_count"].(int)
 	
-	stderrLogger.Printf("Core configuration - E-cores: %d, P-cores: %d, Total usages array length: %d", 
-		eCoreCount, pCoreCount, len(coreUsages))
+	stderrLogger.Printf("Core configuration - P-cores: %d (indices 0-%d), E-cores: %d (indices %d-%d), Total cores: %d",
+		pCoreCount, pCoreCount-1, eCoreCount, pCoreCount, pCoreCount+eCoreCount-1, len(coreUsages))
 	
 	// Calculate average for all cores
 	var totalUsage float64
@@ -544,26 +544,28 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 	}
 	totalUsage /= float64(len(coreUsages))
 	
-	// Calculate average for E-cores (Efficiency cores)
-	var eCoreTotal float64
-	if eCoreCount > 0 {
-		stderrLogger.Printf("E-cores usage values:")
-		for i := 0; i < eCoreCount && i < len(coreUsages); i++ {
-			stderrLogger.Printf("  E-core %d: %.2f%%", i, coreUsages[i])
-			eCoreTotal += coreUsages[i]
-		}
-		eCoreTotal /= float64(eCoreCount)
-	}
-	
 	// Calculate average for P-cores (Performance cores)
+	// On Apple Silicon, P-cores come FIRST in the CPU usage array
 	var pCoreTotal float64
 	if pCoreCount > 0 {
 		stderrLogger.Printf("P-cores usage values:")
-		for i := eCoreCount; i < eCoreCount+pCoreCount && i < len(coreUsages); i++ {
-			stderrLogger.Printf("  P-core %d: %.2f%%", i-eCoreCount, coreUsages[i])
+		for i := 0; i < pCoreCount && i < len(coreUsages); i++ {
+			stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
 			pCoreTotal += coreUsages[i]
 		}
 		pCoreTotal /= float64(pCoreCount)
+	}
+
+	// Calculate average for E-cores (Efficiency cores)
+	// E-cores come AFTER P-cores in the CPU usage array
+	var eCoreTotal float64
+	if eCoreCount > 0 {
+		stderrLogger.Printf("E-cores usage values:")
+		for i := pCoreCount; i < pCoreCount+eCoreCount && i < len(coreUsages); i++ {
+			stderrLogger.Printf("  E-core %d: %.2f%%", i-pCoreCount, coreUsages[i])
+			eCoreTotal += coreUsages[i]
+		}
+		eCoreTotal /= float64(eCoreCount)
 	}
 
 	memoryMetrics := getMemoryMetrics()
@@ -694,6 +696,8 @@ func getSOCInfo() map[string]interface{} {
 	cpuInfoDict := getCPUInfo()
 	coreCountsDict := getCoreCounts()
 	var eCoreCounts, pCoreCounts int
+	// hw.perflevel0 = Performance cores (P-cores)
+	// hw.perflevel1 = Efficiency cores (E-cores)
 	if val, ok := coreCountsDict["hw.perflevel1.logicalcpu"]; ok {
 		eCoreCounts = val
 	}
