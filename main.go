@@ -259,17 +259,19 @@ func getCoreTopology(variant ChipVariant) CoreTopology {
 		return topology
 
 	case strings.Contains(variant.ModelName, "M4 Pro"):
-		// M4 Pro: P-cores first, then E-cores (standard non-Ultra layout)
+		// M4 Pro: E-cores first, then P-cores (similar to M3 Ultra but single die)
 		topology := CoreTopology{
-			Description:  "M4 Pro: P-cores first, then E-cores",
+			Description:  "M4 Pro: E-cores first, then P-cores",
 			PCoreIndices: make([]int, 0, variant.PCoreCount),
 			ECoreIndices: make([]int, 0, variant.ECoreCount),
 		}
-		for i := 0; i < variant.PCoreCount; i++ {
-			topology.PCoreIndices = append(topology.PCoreIndices, i)
-		}
-		for i := variant.PCoreCount; i < totalCores; i++ {
+		// E-cores first (0 to eCoreCount-1)
+		for i := 0; i < variant.ECoreCount; i++ {
 			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		// P-cores after (eCoreCount to totalCores-1)
+		for i := variant.ECoreCount; i < totalCores; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
 		}
 		return topology
 
