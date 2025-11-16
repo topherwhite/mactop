@@ -547,52 +547,87 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 
 	if isUltra {
 		// Ultra chips have two dies fused together
-		// Pattern: Die1_P-cores, Die1_E-cores, Die2_P-cores, Die2_E-cores
-		pCoresPerDie := pCoreCount / 2
-		eCoresPerDie := eCoreCount / 2
+		// M3 Ultra has a different topology than M1/M2 Ultra:
+		// - M3 Ultra: All P-cores first (0 to pCoreCount-1), then all E-cores (pCoreCount to end)
+		// - M1/M2 Ultra: Interleaved pattern (Die1_P, Die1_E, Die2_P, Die2_E)
 
-		stderrLogger.Printf("Ultra chip detected - P-cores: %d (%d per die), E-cores: %d (%d per die), Total cores: %d",
-			pCoreCount, pCoresPerDie, eCoreCount, eCoresPerDie, len(coreUsages))
+		// Detect M3 vs M1/M2 based on chip name
+		cpuName := appleSiliconModel["name"].(string)
+		isM3Ultra := strings.Contains(cpuName, "M3")
 
-		// Die 1: P-cores
-		stderrLogger.Printf("Die 1 P-cores (indices 0-%d):", pCoresPerDie-1)
-		for i := 0; i < pCoresPerDie && i < len(coreUsages); i++ {
-			stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
-			pCoreTotal += coreUsages[i]
-		}
+		if isM3Ultra {
+			// M3 Ultra: P-cores first, E-cores last (non-interleaved)
+			stderrLogger.Printf("M3 Ultra chip detected - P-cores: %d (indices 0-%d), E-cores: %d (indices %d-%d), Total cores: %d",
+				pCoreCount, pCoreCount-1, eCoreCount, pCoreCount, pCoreCount+eCoreCount-1, len(coreUsages))
 
-		// Die 1: E-cores
-		die1EStart := pCoresPerDie
-		die1EEnd := die1EStart + eCoresPerDie
-		stderrLogger.Printf("Die 1 E-cores (indices %d-%d):", die1EStart, die1EEnd-1)
-		for i := die1EStart; i < die1EEnd && i < len(coreUsages); i++ {
-			stderrLogger.Printf("  E-core %d: %.2f%%", i-die1EStart, coreUsages[i])
-			eCoreTotal += coreUsages[i]
-		}
+			// All P-cores
+			stderrLogger.Printf("P-cores (indices 0-%d):", pCoreCount-1)
+			for i := 0; i < pCoreCount && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
+				pCoreTotal += coreUsages[i]
+			}
 
-		// Die 2: P-cores
-		die2PStart := die1EEnd
-		die2PEnd := die2PStart + pCoresPerDie
-		stderrLogger.Printf("Die 2 P-cores (indices %d-%d):", die2PStart, die2PEnd-1)
-		for i := die2PStart; i < die2PEnd && i < len(coreUsages); i++ {
-			stderrLogger.Printf("  P-core %d: %.2f%%", i-die2PStart+pCoresPerDie, coreUsages[i])
-			pCoreTotal += coreUsages[i]
-		}
+			// All E-cores
+			stderrLogger.Printf("E-cores (indices %d-%d):", pCoreCount, pCoreCount+eCoreCount-1)
+			for i := pCoreCount; i < pCoreCount+eCoreCount && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  E-core %d: %.2f%%", i-pCoreCount, coreUsages[i])
+				eCoreTotal += coreUsages[i]
+			}
 
-		// Die 2: E-cores
-		die2EStart := die2PEnd
-		die2EEnd := die2EStart + eCoresPerDie
-		stderrLogger.Printf("Die 2 E-cores (indices %d-%d):", die2EStart, die2EEnd-1)
-		for i := die2EStart; i < die2EEnd && i < len(coreUsages); i++ {
-			stderrLogger.Printf("  E-core %d: %.2f%%", i-die2EStart+eCoresPerDie, coreUsages[i])
-			eCoreTotal += coreUsages[i]
-		}
+			if pCoreCount > 0 {
+				pCoreTotal /= float64(pCoreCount)
+			}
+			if eCoreCount > 0 {
+				eCoreTotal /= float64(eCoreCount)
+			}
+		} else {
+			// M1/M2 Ultra: Interleaved pattern (Die1_P, Die1_E, Die2_P, Die2_E)
+			pCoresPerDie := pCoreCount / 2
+			eCoresPerDie := eCoreCount / 2
 
-		if pCoreCount > 0 {
-			pCoreTotal /= float64(pCoreCount)
-		}
-		if eCoreCount > 0 {
-			eCoreTotal /= float64(eCoreCount)
+			stderrLogger.Printf("M1/M2 Ultra chip detected - P-cores: %d (%d per die), E-cores: %d (%d per die), Total cores: %d",
+				pCoreCount, pCoresPerDie, eCoreCount, eCoresPerDie, len(coreUsages))
+
+			// Die 1: P-cores
+			stderrLogger.Printf("Die 1 P-cores (indices 0-%d):", pCoresPerDie-1)
+			for i := 0; i < pCoresPerDie && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
+				pCoreTotal += coreUsages[i]
+			}
+
+			// Die 1: E-cores
+			die1EStart := pCoresPerDie
+			die1EEnd := die1EStart + eCoresPerDie
+			stderrLogger.Printf("Die 1 E-cores (indices %d-%d):", die1EStart, die1EEnd-1)
+			for i := die1EStart; i < die1EEnd && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  E-core %d: %.2f%%", i-die1EStart, coreUsages[i])
+				eCoreTotal += coreUsages[i]
+			}
+
+			// Die 2: P-cores
+			die2PStart := die1EEnd
+			die2PEnd := die2PStart + pCoresPerDie
+			stderrLogger.Printf("Die 2 P-cores (indices %d-%d):", die2PStart, die2PEnd-1)
+			for i := die2PStart; i < die2PEnd && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  P-core %d: %.2f%%", i-die2PStart+pCoresPerDie, coreUsages[i])
+				pCoreTotal += coreUsages[i]
+			}
+
+			// Die 2: E-cores
+			die2EStart := die2PEnd
+			die2EEnd := die2EStart + eCoresPerDie
+			stderrLogger.Printf("Die 2 E-cores (indices %d-%d):", die2EStart, die2EEnd-1)
+			for i := die2EStart; i < die2EEnd && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  E-core %d: %.2f%%", i-die2EStart+eCoresPerDie, coreUsages[i])
+				eCoreTotal += coreUsages[i]
+			}
+
+			if pCoreCount > 0 {
+				pCoreTotal /= float64(pCoreCount)
+			}
+			if eCoreCount > 0 {
+				eCoreTotal /= float64(eCoreCount)
+			}
 		}
 	} else {
 		// Non-Ultra chips: P-cores come first, then E-cores
