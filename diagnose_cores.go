@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // Copyright (c) 2024-2025 Carsen Klock under MIT License
 // Diagnostic tool to determine E-core vs P-core ordering
 package main

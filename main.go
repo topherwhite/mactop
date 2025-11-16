@@ -165,6 +165,160 @@ type MemoryMetrics struct {
 	Total, Used, Available, SwapTotal, SwapUsed uint64
 }
 
+// CoreTopology describes how cores are arranged in the CPU usage array
+type CoreTopology struct {
+	// PCoreIndices contains the indices of all P-cores in the CPU usage array
+	PCoreIndices []int
+	// ECoreIndices contains the indices of all E-cores in the CPU usage array
+	ECoreIndices []int
+	// Description provides human-readable info about the topology
+	Description string
+}
+
+// ChipVariant uniquely identifies a chip configuration
+type ChipVariant struct {
+	ModelName  string // e.g., "M3 Ultra", "M4 Pro"
+	PCoreCount int
+	ECoreCount int
+}
+
+// getChipVariant returns a unique identifier for the current chip
+func getChipVariant(cpuName string, pCoreCount, eCoreCount int) ChipVariant {
+	// Extract model name (e.g., "Apple M3 Ultra" -> "M3 Ultra")
+	modelName := cpuName
+	if strings.HasPrefix(cpuName, "Apple ") {
+		modelName = strings.TrimPrefix(cpuName, "Apple ")
+	}
+
+	return ChipVariant{
+		ModelName:  modelName,
+		PCoreCount: pCoreCount,
+		ECoreCount: eCoreCount,
+	}
+}
+
+// getCoreTopology returns the core topology for a given chip variant
+func getCoreTopology(variant ChipVariant) CoreTopology {
+	totalCores := variant.PCoreCount + variant.ECoreCount
+
+	// Check for known chip-specific topologies
+	switch {
+	case strings.Contains(variant.ModelName, "M3 Ultra") && variant.PCoreCount == 24 && variant.ECoreCount == 8:
+		// M3 Ultra 32-core (24P + 8E): E-cores first within each die
+		// Die 1: E-cores 0-3, P-cores 4-15
+		// Die 2: E-cores 16-19, P-cores 20-31
+		topology := CoreTopology{
+			Description:  "M3 Ultra 32-core: E-cores first within each die",
+			PCoreIndices: make([]int, 0, 24),
+			ECoreIndices: make([]int, 0, 8),
+		}
+		// Die 1 E-cores: 0-3
+		for i := 0; i < 4; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		// Die 1 P-cores: 4-15
+		for i := 4; i < 16; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		// Die 2 E-cores: 16-19
+		for i := 16; i < 20; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		// Die 2 P-cores: 20-31
+		for i := 20; i < 32; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		return topology
+
+	case strings.Contains(variant.ModelName, "M3 Ultra") && variant.PCoreCount == 20 && variant.ECoreCount == 8:
+		// M3 Ultra 28-core (20P + 8E): Need to determine correct mapping
+		// Based on M3 Ultra architecture, likely same pattern but with fewer P-cores per die
+		// Die 1: E-cores 0-3, P-cores 4-13
+		// Die 2: E-cores 14-17, P-cores 18-27
+		topology := CoreTopology{
+			Description:  "M3 Ultra 28-core: E-cores first within each die",
+			PCoreIndices: make([]int, 0, 20),
+			ECoreIndices: make([]int, 0, 8),
+		}
+		// Die 1 E-cores: 0-3
+		for i := 0; i < 4; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		// Die 1 P-cores: 4-13
+		for i := 4; i < 14; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		// Die 2 E-cores: 14-17
+		for i := 14; i < 18; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		// Die 2 P-cores: 18-27
+		for i := 18; i < 28; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		return topology
+
+	case strings.Contains(variant.ModelName, "M4 Pro"):
+		// M4 Pro: P-cores first, then E-cores (standard non-Ultra layout)
+		topology := CoreTopology{
+			Description:  "M4 Pro: P-cores first, then E-cores",
+			PCoreIndices: make([]int, 0, variant.PCoreCount),
+			ECoreIndices: make([]int, 0, variant.ECoreCount),
+		}
+		for i := 0; i < variant.PCoreCount; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		for i := variant.PCoreCount; i < totalCores; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		return topology
+
+	case strings.Contains(variant.ModelName, "M1 Ultra") || strings.Contains(variant.ModelName, "M2 Ultra"):
+		// M1/M2 Ultra: P-cores first within each die (interleaved pattern)
+		// Die 1: P-cores, E-cores
+		// Die 2: P-cores, E-cores
+		pCoresPerDie := variant.PCoreCount / 2
+		eCoresPerDie := variant.ECoreCount / 2
+		topology := CoreTopology{
+			Description:  "M1/M2 Ultra: P-cores first within each die",
+			PCoreIndices: make([]int, 0, variant.PCoreCount),
+			ECoreIndices: make([]int, 0, variant.ECoreCount),
+		}
+		// Die 1 P-cores
+		for i := 0; i < pCoresPerDie; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		// Die 1 E-cores
+		for i := pCoresPerDie; i < pCoresPerDie+eCoresPerDie; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		// Die 2 P-cores
+		for i := pCoresPerDie + eCoresPerDie; i < 2*pCoresPerDie+eCoresPerDie; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		// Die 2 E-cores
+		for i := 2*pCoresPerDie + eCoresPerDie; i < totalCores; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		return topology
+
+	default:
+		// Default for most chips: P-cores first, then E-cores
+		topology := CoreTopology{
+			Description:  "Standard layout: P-cores first, then E-cores",
+			PCoreIndices: make([]int, 0, variant.PCoreCount),
+			ECoreIndices: make([]int, 0, variant.ECoreCount),
+		}
+		for i := 0; i < variant.PCoreCount; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		for i := variant.PCoreCount; i < totalCores; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		return topology
+	}
+}
+
 
 func NewCPUMetrics() CPUMetrics {
 	return CPUMetrics{
@@ -528,12 +682,20 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 		stderrLogger.Printf("Error getting CPU percentages: %v\n", err)
 		return
 	}
-	
+
 	// Get SOC info for core counts
 	appleSiliconModel := getSOCInfo()
 	eCoreCount, _ := appleSiliconModel["e_core_count"].(int)
 	pCoreCount, _ := appleSiliconModel["p_core_count"].(int)
-	isUltra, _ := appleSiliconModel["is_ultra"].(bool)
+	cpuName, _ := appleSiliconModel["name"].(string)
+
+	// Get chip variant and topology
+	variant := getChipVariant(cpuName, pCoreCount, eCoreCount)
+	topology := getCoreTopology(variant)
+
+	stderrLogger.Printf("Chip: %s (%dP + %dE cores), Total cores: %d",
+		variant.ModelName, pCoreCount, eCoreCount, len(coreUsages))
+	stderrLogger.Printf("Topology: %s", topology.Description)
 
 	// Calculate average for all cores
 	var totalUsage float64
@@ -542,142 +704,30 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 	}
 	totalUsage /= float64(len(coreUsages))
 
+	// Calculate P-core average using topology
 	var pCoreTotal float64
+	if len(topology.PCoreIndices) > 0 {
+		stderrLogger.Printf("P-cores usage values:")
+		for _, idx := range topology.PCoreIndices {
+			if idx < len(coreUsages) {
+				stderrLogger.Printf("  P-core at index %d: %.2f%%", idx, coreUsages[idx])
+				pCoreTotal += coreUsages[idx]
+			}
+		}
+		pCoreTotal /= float64(len(topology.PCoreIndices))
+	}
+
+	// Calculate E-core average using topology
 	var eCoreTotal float64
-
-	if isUltra {
-		// Ultra chips have two dies fused together
-		// M3 Ultra has a different topology than M1/M2 Ultra:
-		// - M3 Ultra: E-cores FIRST within each die, then P-cores (Die1_E, Die1_P, Die2_E, Die2_P)
-		// - M1/M2 Ultra: P-cores FIRST within each die, then E-cores (Die1_P, Die1_E, Die2_P, Die2_E)
-
-		// Detect M3 vs M1/M2 based on chip name
-		cpuName := appleSiliconModel["name"].(string)
-		isM3Ultra := strings.Contains(cpuName, "M3")
-
-		if isM3Ultra {
-			// M3 Ultra: E-cores first within each die, then P-cores
-			// Die 1: E-cores at 0 to eCoresPerDie-1, P-cores at eCoresPerDie to (eCoresPerDie+pCoresPerDie-1)
-			// Die 2: E-cores at die2Start to die2Start+eCoresPerDie-1, P-cores at die2Start+eCoresPerDie to end
-			eCoresPerDie := eCoreCount / 2
-			pCoresPerDie := pCoreCount / 2
-
-			stderrLogger.Printf("M3 Ultra chip detected - E-cores: %d (%d per die), P-cores: %d (%d per die), Total cores: %d",
-				eCoreCount, eCoresPerDie, pCoreCount, pCoresPerDie, len(coreUsages))
-
-			// Die 1: E-cores
-			stderrLogger.Printf("Die 1 E-cores (indices 0-%d):", eCoresPerDie-1)
-			for i := 0; i < eCoresPerDie && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  E-core %d: %.2f%%", i, coreUsages[i])
-				eCoreTotal += coreUsages[i]
-			}
-
-			// Die 1: P-cores
-			die1PStart := eCoresPerDie
-			die1PEnd := die1PStart + pCoresPerDie
-			stderrLogger.Printf("Die 1 P-cores (indices %d-%d):", die1PStart, die1PEnd-1)
-			for i := die1PStart; i < die1PEnd && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  P-core %d: %.2f%%", i-die1PStart, coreUsages[i])
-				pCoreTotal += coreUsages[i]
-			}
-
-			// Die 2: E-cores
-			die2EStart := die1PEnd
-			die2EEnd := die2EStart + eCoresPerDie
-			stderrLogger.Printf("Die 2 E-cores (indices %d-%d):", die2EStart, die2EEnd-1)
-			for i := die2EStart; i < die2EEnd && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  E-core %d: %.2f%%", i-die2EStart+eCoresPerDie, coreUsages[i])
-				eCoreTotal += coreUsages[i]
-			}
-
-			// Die 2: P-cores
-			die2PStart := die2EEnd
-			die2PEnd := die2PStart + pCoresPerDie
-			stderrLogger.Printf("Die 2 P-cores (indices %d-%d):", die2PStart, die2PEnd-1)
-			for i := die2PStart; i < die2PEnd && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  P-core %d: %.2f%%", i-die2PStart+pCoresPerDie, coreUsages[i])
-				pCoreTotal += coreUsages[i]
-			}
-
-			if pCoreCount > 0 {
-				pCoreTotal /= float64(pCoreCount)
-			}
-			if eCoreCount > 0 {
-				eCoreTotal /= float64(eCoreCount)
-			}
-		} else {
-			// M1/M2 Ultra: Interleaved pattern (Die1_P, Die1_E, Die2_P, Die2_E)
-			pCoresPerDie := pCoreCount / 2
-			eCoresPerDie := eCoreCount / 2
-
-			stderrLogger.Printf("M1/M2 Ultra chip detected - P-cores: %d (%d per die), E-cores: %d (%d per die), Total cores: %d",
-				pCoreCount, pCoresPerDie, eCoreCount, eCoresPerDie, len(coreUsages))
-
-			// Die 1: P-cores
-			stderrLogger.Printf("Die 1 P-cores (indices 0-%d):", pCoresPerDie-1)
-			for i := 0; i < pCoresPerDie && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
-				pCoreTotal += coreUsages[i]
-			}
-
-			// Die 1: E-cores
-			die1EStart := pCoresPerDie
-			die1EEnd := die1EStart + eCoresPerDie
-			stderrLogger.Printf("Die 1 E-cores (indices %d-%d):", die1EStart, die1EEnd-1)
-			for i := die1EStart; i < die1EEnd && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  E-core %d: %.2f%%", i-die1EStart, coreUsages[i])
-				eCoreTotal += coreUsages[i]
-			}
-
-			// Die 2: P-cores
-			die2PStart := die1EEnd
-			die2PEnd := die2PStart + pCoresPerDie
-			stderrLogger.Printf("Die 2 P-cores (indices %d-%d):", die2PStart, die2PEnd-1)
-			for i := die2PStart; i < die2PEnd && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  P-core %d: %.2f%%", i-die2PStart+pCoresPerDie, coreUsages[i])
-				pCoreTotal += coreUsages[i]
-			}
-
-			// Die 2: E-cores
-			die2EStart := die2PEnd
-			die2EEnd := die2EStart + eCoresPerDie
-			stderrLogger.Printf("Die 2 E-cores (indices %d-%d):", die2EStart, die2EEnd-1)
-			for i := die2EStart; i < die2EEnd && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  E-core %d: %.2f%%", i-die2EStart+eCoresPerDie, coreUsages[i])
-				eCoreTotal += coreUsages[i]
-			}
-
-			if pCoreCount > 0 {
-				pCoreTotal /= float64(pCoreCount)
-			}
-			if eCoreCount > 0 {
-				eCoreTotal /= float64(eCoreCount)
+	if len(topology.ECoreIndices) > 0 {
+		stderrLogger.Printf("E-cores usage values:")
+		for _, idx := range topology.ECoreIndices {
+			if idx < len(coreUsages) {
+				stderrLogger.Printf("  E-core at index %d: %.2f%%", idx, coreUsages[idx])
+				eCoreTotal += coreUsages[idx]
 			}
 		}
-	} else {
-		// Non-Ultra chips: P-cores come first, then E-cores
-		stderrLogger.Printf("Core configuration - P-cores: %d (indices 0-%d), E-cores: %d (indices %d-%d), Total cores: %d",
-			pCoreCount, pCoreCount-1, eCoreCount, pCoreCount, pCoreCount+eCoreCount-1, len(coreUsages))
-
-		// Calculate average for P-cores (Performance cores)
-		if pCoreCount > 0 {
-			stderrLogger.Printf("P-cores usage values:")
-			for i := 0; i < pCoreCount && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
-				pCoreTotal += coreUsages[i]
-			}
-			pCoreTotal /= float64(pCoreCount)
-		}
-
-		// Calculate average for E-cores (Efficiency cores)
-		if eCoreCount > 0 {
-			stderrLogger.Printf("E-cores usage values:")
-			for i := pCoreCount; i < pCoreCount+eCoreCount && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  E-core %d: %.2f%%", i-pCoreCount, coreUsages[i])
-				eCoreTotal += coreUsages[i]
-			}
-			eCoreTotal /= float64(eCoreCount)
-		}
+		eCoreTotal /= float64(len(topology.ECoreIndices))
 	}
 
 	memoryMetrics := getMemoryMetrics()
