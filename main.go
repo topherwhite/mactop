@@ -548,30 +548,55 @@ func updateCPUPrometheus(cpuMetrics CPUMetrics) {
 	if isUltra {
 		// Ultra chips have two dies fused together
 		// M3 Ultra has a different topology than M1/M2 Ultra:
-		// - M3 Ultra: All P-cores first (0 to pCoreCount-1), then all E-cores (pCoreCount to end)
-		// - M1/M2 Ultra: Interleaved pattern (Die1_P, Die1_E, Die2_P, Die2_E)
+		// - M3 Ultra: E-cores FIRST within each die, then P-cores (Die1_E, Die1_P, Die2_E, Die2_P)
+		// - M1/M2 Ultra: P-cores FIRST within each die, then E-cores (Die1_P, Die1_E, Die2_P, Die2_E)
 
 		// Detect M3 vs M1/M2 based on chip name
 		cpuName := appleSiliconModel["name"].(string)
 		isM3Ultra := strings.Contains(cpuName, "M3")
 
 		if isM3Ultra {
-			// M3 Ultra: P-cores first, E-cores last (non-interleaved)
-			stderrLogger.Printf("M3 Ultra chip detected - P-cores: %d (indices 0-%d), E-cores: %d (indices %d-%d), Total cores: %d",
-				pCoreCount, pCoreCount-1, eCoreCount, pCoreCount, pCoreCount+eCoreCount-1, len(coreUsages))
+			// M3 Ultra: E-cores first within each die, then P-cores
+			// Die 1: E-cores at 0 to eCoresPerDie-1, P-cores at eCoresPerDie to (eCoresPerDie+pCoresPerDie-1)
+			// Die 2: E-cores at die2Start to die2Start+eCoresPerDie-1, P-cores at die2Start+eCoresPerDie to end
+			eCoresPerDie := eCoreCount / 2
+			pCoresPerDie := pCoreCount / 2
 
-			// All P-cores
-			stderrLogger.Printf("P-cores (indices 0-%d):", pCoreCount-1)
-			for i := 0; i < pCoreCount && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  P-core %d: %.2f%%", i, coreUsages[i])
+			stderrLogger.Printf("M3 Ultra chip detected - E-cores: %d (%d per die), P-cores: %d (%d per die), Total cores: %d",
+				eCoreCount, eCoresPerDie, pCoreCount, pCoresPerDie, len(coreUsages))
+
+			// Die 1: E-cores
+			stderrLogger.Printf("Die 1 E-cores (indices 0-%d):", eCoresPerDie-1)
+			for i := 0; i < eCoresPerDie && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  E-core %d: %.2f%%", i, coreUsages[i])
+				eCoreTotal += coreUsages[i]
+			}
+
+			// Die 1: P-cores
+			die1PStart := eCoresPerDie
+			die1PEnd := die1PStart + pCoresPerDie
+			stderrLogger.Printf("Die 1 P-cores (indices %d-%d):", die1PStart, die1PEnd-1)
+			for i := die1PStart; i < die1PEnd && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  P-core %d: %.2f%%", i-die1PStart, coreUsages[i])
 				pCoreTotal += coreUsages[i]
 			}
 
-			// All E-cores
-			stderrLogger.Printf("E-cores (indices %d-%d):", pCoreCount, pCoreCount+eCoreCount-1)
-			for i := pCoreCount; i < pCoreCount+eCoreCount && i < len(coreUsages); i++ {
-				stderrLogger.Printf("  E-core %d: %.2f%%", i-pCoreCount, coreUsages[i])
+			// Die 2: E-cores
+			die2EStart := die1PEnd
+			die2EEnd := die2EStart + eCoresPerDie
+			stderrLogger.Printf("Die 2 E-cores (indices %d-%d):", die2EStart, die2EEnd-1)
+			for i := die2EStart; i < die2EEnd && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  E-core %d: %.2f%%", i-die2EStart+eCoresPerDie, coreUsages[i])
 				eCoreTotal += coreUsages[i]
+			}
+
+			// Die 2: P-cores
+			die2PStart := die2EEnd
+			die2PEnd := die2PStart + pCoresPerDie
+			stderrLogger.Printf("Die 2 P-cores (indices %d-%d):", die2PStart, die2PEnd-1)
+			for i := die2PStart; i < die2PEnd && i < len(coreUsages); i++ {
+				stderrLogger.Printf("  P-core %d: %.2f%%", i-die2PStart+pCoresPerDie, coreUsages[i])
+				pCoreTotal += coreUsages[i]
 			}
 
 			if pCoreCount > 0 {

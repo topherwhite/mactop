@@ -231,25 +231,57 @@ func main() {
 			isM3 := strings.Contains(cpuName, "M3")
 
 			if isM3 {
-				fmt.Println("\nM3 Ultra detected - Uses NON-INTERLEAVED topology:")
-				fmt.Printf("  All P-cores first (indices 0-%d)\n", perfLevel0-1)
-				fmt.Printf("  All E-cores last (indices %d-%d)\n", perfLevel0, perfLevel0+perfLevel1-1)
+				fmt.Println("\nM3 Ultra detected - E-cores FIRST within each die, then P-cores:")
+				eCoresPerDie := perfLevel1 / 2
+				pCoresPerDie := perfLevel0 / 2
+				fmt.Printf("Expected pattern (2 dies, %d E-cores + %d P-cores per die):\n",
+					eCoresPerDie, pCoresPerDie)
+				fmt.Printf("  Die 1: E-cores at indices 0-%d, P-cores at indices %d-%d\n",
+					eCoresPerDie-1, eCoresPerDie, eCoresPerDie+pCoresPerDie-1)
+				die2EStart := eCoresPerDie + pCoresPerDie
+				die2EEnd := die2EStart + eCoresPerDie - 1
+				die2PStart := die2EEnd + 1
+				die2PEnd := die2PStart + pCoresPerDie - 1
+				fmt.Printf("  Die 2: E-cores at indices %d-%d, P-cores at indices %d-%d\n",
+					die2EStart, die2EEnd, die2PStart, die2PEnd)
 
+				// Analyze each die's pattern
 				if len(currentUsage) >= perfLevel0+perfLevel1 {
-					pCoreAvg := 0.0
-					for i := 0; i < perfLevel0; i++ {
-						pCoreAvg += currentUsage[i]
+					fmt.Println("\nDie 1 analysis:")
+					die1EAvg := 0.0
+					for i := 0; i < eCoresPerDie; i++ {
+						die1EAvg += currentUsage[i]
 					}
-					pCoreAvg /= float64(perfLevel0)
+					die1EAvg /= float64(eCoresPerDie)
+					fmt.Printf("  Die 1 E-cores (0-%d) average: %.2f%%\n", eCoresPerDie-1, die1EAvg)
 
-					eCoreAvg := 0.0
-					for i := perfLevel0; i < perfLevel0+perfLevel1; i++ {
-						eCoreAvg += currentUsage[i]
+					die1PAvg := 0.0
+					for i := eCoresPerDie; i < eCoresPerDie+pCoresPerDie; i++ {
+						die1PAvg += currentUsage[i]
 					}
-					eCoreAvg /= float64(perfLevel1)
+					die1PAvg /= float64(pCoresPerDie)
+					fmt.Printf("  Die 1 P-cores (%d-%d) average: %.2f%%\n",
+						eCoresPerDie, eCoresPerDie+pCoresPerDie-1, die1PAvg)
 
-					fmt.Printf("\nP-cores (0-%d) average: %.2f%%\n", perfLevel0-1, pCoreAvg)
-					fmt.Printf("E-cores (%d-%d) average: %.2f%%\n", perfLevel0, perfLevel0+perfLevel1-1, eCoreAvg)
+					fmt.Println("\nDie 2 analysis:")
+					die2EAvg := 0.0
+					for i := die2EStart; i <= die2EEnd && i < len(currentUsage); i++ {
+						die2EAvg += currentUsage[i]
+					}
+					die2EAvg /= float64(eCoresPerDie)
+					fmt.Printf("  Die 2 E-cores (%d-%d) average: %.2f%%\n", die2EStart, die2EEnd, die2EAvg)
+
+					die2PAvg := 0.0
+					for i := die2PStart; i <= die2PEnd && i < len(currentUsage); i++ {
+						die2PAvg += currentUsage[i]
+					}
+					die2PAvg /= float64(pCoresPerDie)
+					fmt.Printf("  Die 2 P-cores (%d-%d) average: %.2f%%\n", die2PStart, die2PEnd, die2PAvg)
+
+					totalEAvg := (die1EAvg + die2EAvg) / 2.0
+					totalPAvg := (die1PAvg + die2PAvg) / 2.0
+					fmt.Printf("\nOverall E-cores average: %.2f%%\n", totalEAvg)
+					fmt.Printf("Overall P-cores average: %.2f%%\n", totalPAvg)
 				}
 			} else {
 				fmt.Println("\nM1/M2 Ultra detected - Uses INTERLEAVED topology:")
@@ -329,7 +361,7 @@ func main() {
 	fmt.Println("\n=== Implementation Status ===")
 	fmt.Println("The main.go code now handles all chip topologies:")
 	fmt.Println("  - Non-Ultra: P-cores first (0 to P-1), E-cores second (P to P+E-1)")
-	fmt.Println("  - M3 Ultra: P-cores first (0 to P-1), E-cores second (P to P+E-1)")
-	fmt.Println("  - M1/M2 Ultra: Interleaved (Die1_P, Die1_E, Die2_P, Die2_E)")
+	fmt.Println("  - M3 Ultra: E-cores first within each die (Die1_E, Die1_P, Die2_E, Die2_P)")
+	fmt.Println("  - M1/M2 Ultra: P-cores first within each die (Die1_P, Die1_E, Die2_P, Die2_E)")
 	fmt.Println("\nThe fix properly calculates separate averages for P-cores and E-cores.")
 }
