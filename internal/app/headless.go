@@ -10,6 +10,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// Note: strings is still needed for TrimPrefix in startPrometheusServer call
+
 func runHeadless(count int) {
 	if err := initSocMetrics(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize metrics: %v\n", err)
@@ -97,49 +99,27 @@ func runHeadless(count int) {
 
 		// Update Prometheus metrics
 		if prometheusPort != "" && len(percentages) > 0 {
-			// Calculate E-core and P-core averages using correct topology
+			// Use topology-aware core mapping
+			topology := GetCoreTopology(sysInfo)
+
 			var ecoreAvg, pcoreAvg float64
-			pCoreCount := sysInfo.PCoreCount
-			eCoreCount := sysInfo.ECoreCount
-
-			// Check if M1/M2 Ultra (interleaved topology)
-			isInterleaved := sysInfo.IsUltra && (strings.Contains(sysInfo.Name, "M1") || strings.Contains(sysInfo.Name, "M2"))
-
-			if isInterleaved {
-				// M1/M2 Ultra: interleaved topology
-				pCorePerDie := pCoreCount / 2
-				eCorePerDie := eCoreCount / 2
-				var pcoreSum, ecoreSum float64
-				for die := 0; die < 2; die++ {
-					pCoreStart := die * (pCorePerDie + eCorePerDie)
-					eCoreStart := pCoreStart + pCorePerDie
-					for i := 0; i < pCorePerDie && pCoreStart+i < len(percentages); i++ {
-						pcoreSum += percentages[pCoreStart+i]
-					}
-					for i := 0; i < eCorePerDie && eCoreStart+i < len(percentages); i++ {
-						ecoreSum += percentages[eCoreStart+i]
+			if len(topology.PCoreIndices) > 0 {
+				var pcoreSum float64
+				for _, idx := range topology.PCoreIndices {
+					if idx < len(percentages) {
+						pcoreSum += percentages[idx]
 					}
 				}
-				if pCoreCount > 0 {
-					pcoreAvg = pcoreSum / float64(pCoreCount)
+				pcoreAvg = pcoreSum / float64(len(topology.PCoreIndices))
+			}
+			if len(topology.ECoreIndices) > 0 {
+				var ecoreSum float64
+				for _, idx := range topology.ECoreIndices {
+					if idx < len(percentages) {
+						ecoreSum += percentages[idx]
+					}
 				}
-				if eCoreCount > 0 {
-					ecoreAvg = ecoreSum / float64(eCoreCount)
-				}
-			} else {
-				// Non-interleaved: P-cores first, then E-cores
-				for i := 0; i < pCoreCount && i < len(percentages); i++ {
-					pcoreAvg += percentages[i]
-				}
-				if pCoreCount > 0 {
-					pcoreAvg /= float64(pCoreCount)
-				}
-				for i := 0; i < eCoreCount && pCoreCount+i < len(percentages); i++ {
-					ecoreAvg += percentages[pCoreCount+i]
-				}
-				if eCoreCount > 0 {
-					ecoreAvg /= float64(eCoreCount)
-				}
+				ecoreAvg = ecoreSum / float64(len(topology.ECoreIndices))
 			}
 
 			// Update all prometheus metrics

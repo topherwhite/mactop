@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"image"
+	"strings"
 	"time"
 
 	ui "github.com/gizak/termui/v3"
@@ -34,6 +35,124 @@ type SystemInfo struct {
 	GPUCoreCount  int    `json:"gpu_core_count"`
 	IsUltra       bool   `json:"is_ultra"`
 	IsInterleaved bool   `json:"is_interleaved"`
+}
+
+// CoreTopology defines the mapping of core indices to P-cores and E-cores
+type CoreTopology struct {
+	PCoreIndices []int
+	ECoreIndices []int
+	Description  string
+}
+
+// GetCoreTopology returns the correct core topology for the given system
+func GetCoreTopology(sysInfo SystemInfo) CoreTopology {
+	totalCores := sysInfo.PCoreCount + sysInfo.ECoreCount
+	name := sysInfo.Name
+
+	switch {
+	case strings.Contains(name, "M3 Ultra") && sysInfo.PCoreCount == 24 && sysInfo.ECoreCount == 8:
+		// M3 Ultra 32-core (24P + 8E): E-cores first within each die
+		// Die 1: E-cores 0-3, P-cores 4-15
+		// Die 2: E-cores 16-19, P-cores 20-31
+		topology := CoreTopology{
+			Description:  "M3 Ultra 32-core: E-cores first within each die",
+			PCoreIndices: make([]int, 0, 24),
+			ECoreIndices: make([]int, 0, 8),
+		}
+		for i := 0; i < 4; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		for i := 4; i < 16; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		for i := 16; i < 20; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		for i := 20; i < 32; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		return topology
+
+	case strings.Contains(name, "M3 Ultra") && sysInfo.PCoreCount == 20 && sysInfo.ECoreCount == 8:
+		// M3 Ultra 28-core (20P + 8E): E-cores first within each die
+		// Die 1: E-cores 0-3, P-cores 4-13
+		// Die 2: E-cores 14-17, P-cores 18-27
+		topology := CoreTopology{
+			Description:  "M3 Ultra 28-core: E-cores first within each die",
+			PCoreIndices: make([]int, 0, 20),
+			ECoreIndices: make([]int, 0, 8),
+		}
+		for i := 0; i < 4; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		for i := 4; i < 14; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		for i := 14; i < 18; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		for i := 18; i < 28; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		return topology
+
+	case strings.Contains(name, "M4 Pro"):
+		// M4 Pro: E-cores first, then P-cores
+		topology := CoreTopology{
+			Description:  "M4 Pro: E-cores first, then P-cores",
+			PCoreIndices: make([]int, 0, sysInfo.PCoreCount),
+			ECoreIndices: make([]int, 0, sysInfo.ECoreCount),
+		}
+		for i := 0; i < sysInfo.ECoreCount; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		for i := sysInfo.ECoreCount; i < totalCores; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		return topology
+
+	case strings.Contains(name, "M1 Ultra") || strings.Contains(name, "M2 Ultra"):
+		// M1/M2 Ultra: P-cores first within each die (interleaved pattern)
+		pCoresPerDie := sysInfo.PCoreCount / 2
+		eCoresPerDie := sysInfo.ECoreCount / 2
+		topology := CoreTopology{
+			Description:  "M1/M2 Ultra: P-cores first within each die",
+			PCoreIndices: make([]int, 0, sysInfo.PCoreCount),
+			ECoreIndices: make([]int, 0, sysInfo.ECoreCount),
+		}
+		// Die 1 P-cores
+		for i := 0; i < pCoresPerDie; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		// Die 1 E-cores
+		for i := pCoresPerDie; i < pCoresPerDie+eCoresPerDie; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		// Die 2 P-cores
+		for i := pCoresPerDie + eCoresPerDie; i < 2*pCoresPerDie+eCoresPerDie; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		// Die 2 E-cores
+		for i := 2*pCoresPerDie + eCoresPerDie; i < totalCores; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		return topology
+
+	default:
+		// Default for most chips: P-cores first, then E-cores
+		topology := CoreTopology{
+			Description:  "Standard layout: P-cores first, then E-cores",
+			PCoreIndices: make([]int, 0, sysInfo.PCoreCount),
+			ECoreIndices: make([]int, 0, sysInfo.ECoreCount),
+		}
+		for i := 0; i < sysInfo.PCoreCount; i++ {
+			topology.PCoreIndices = append(topology.PCoreIndices, i)
+		}
+		for i := sysInfo.PCoreCount; i < totalCores; i++ {
+			topology.ECoreIndices = append(topology.ECoreIndices, i)
+		}
+		return topology
+	}
 }
 
 type NetDiskMetrics struct {

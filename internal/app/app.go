@@ -1182,41 +1182,28 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	memoryGauge.Title = fmt.Sprintf("Memory Usage: %.2f GB / %.2f GB (Swap: %.2f/%.2f GB)", float64(memoryMetrics.Used)/1024/1024/1024, float64(memoryMetrics.Total)/1024/1024/1024, float64(memoryMetrics.SwapUsed)/1024/1024/1024, float64(memoryMetrics.SwapTotal)/1024/1024/1024)
 	memoryGauge.Percent = int((float64(memoryMetrics.Used) / float64(memoryMetrics.Total)) * 100)
 
+	// Use the topology-aware core mapping
+	sysInfo := getSOCInfo()
+	topology := GetCoreTopology(sysInfo)
+
 	var ecoreAvg, pcoreAvg float64
-
-	if cpuCoreWidget.IsInterleaved {
-		pCorePerDie := cpuCoreWidget.pCoreCount / 2
-		eCorePerDie := cpuCoreWidget.eCoreCount / 2
-
-		var pcoreSum, ecoreSum float64
-		for die := 0; die < 2; die++ {
-			pCoreStart := die * (pCorePerDie + eCorePerDie)
-			eCoreStart := pCoreStart + pCorePerDie
-
-			for i := 0; i < pCorePerDie; i++ {
-				pcoreSum += coreUsages[pCoreStart+i]
-			}
-			for i := 0; i < eCorePerDie; i++ {
-				ecoreSum += coreUsages[eCoreStart+i]
+	if len(topology.PCoreIndices) > 0 {
+		var pcoreSum float64
+		for _, idx := range topology.PCoreIndices {
+			if idx < len(coreUsages) {
+				pcoreSum += coreUsages[idx]
 			}
 		}
-		pcoreAvg = pcoreSum / float64(cpuCoreWidget.pCoreCount)
-		ecoreAvg = ecoreSum / float64(cpuCoreWidget.eCoreCount)
-	} else {
-		// Non-interleaved topology: all P-cores first, then all E-cores
-		// This applies to: non-Ultra chips AND M3 Ultra (which is non-interleaved despite being Ultra)
-		pCoreStart := 0
-		eCoreStart := cpuCoreWidget.pCoreCount
-
-		for i := 0; i < cpuCoreWidget.pCoreCount; i++ {
-			pcoreAvg += coreUsages[pCoreStart+i]
+		pcoreAvg = pcoreSum / float64(len(topology.PCoreIndices))
+	}
+	if len(topology.ECoreIndices) > 0 {
+		var ecoreSum float64
+		for _, idx := range topology.ECoreIndices {
+			if idx < len(coreUsages) {
+				ecoreSum += coreUsages[idx]
+			}
 		}
-		pcoreAvg /= float64(cpuCoreWidget.pCoreCount)
-
-		for i := 0; i < cpuCoreWidget.eCoreCount; i++ {
-			ecoreAvg += coreUsages[eCoreStart+i]
-		}
-		ecoreAvg /= float64(cpuCoreWidget.eCoreCount)
+		ecoreAvg = ecoreSum / float64(len(topology.ECoreIndices))
 	}
 
 	thermalStateVal, _ := getThermalStateString()
