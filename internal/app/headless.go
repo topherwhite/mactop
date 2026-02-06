@@ -151,6 +151,7 @@ func runHeadless(count int) {
 			networkSpeed.With(prometheus.Labels{"direction": "download"}).Set(netDisk.InBytesPerSec)
 			diskIOSpeed.With(prometheus.Labels{"operation": "read"}).Set(netDisk.ReadKBytesPerSec)
 			diskIOSpeed.With(prometheus.Labels{"operation": "write"}).Set(netDisk.WriteKBytesPerSec)
+			totalPowerGauge.Set(m.TotalPower)
 		}
 
 		if samplesCollected > 0 && count > 0 {

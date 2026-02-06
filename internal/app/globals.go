@@ -128,4 +128,10 @@ var (
 		[]string{"operation"},
 	)
 
+	totalPowerGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "mactop_total_power_watts",
+			Help: "Total system power consumption in watts",
+		},
+	)
 )
