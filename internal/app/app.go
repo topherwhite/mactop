@@ -1183,17 +1183,40 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	memoryGauge.Percent = int((float64(memoryMetrics.Used) / float64(memoryMetrics.Total)) * 100)
 
 	var ecoreAvg, pcoreAvg float64
-	if cpuCoreWidget.eCoreCount > 0 && len(coreUsages) >= cpuCoreWidget.eCoreCount {
-		for i := 0; i < cpuCoreWidget.eCoreCount; i++ {
-			ecoreAvg += coreUsages[i]
+
+	if cpuCoreWidget.IsInterleaved {
+		pCorePerDie := cpuCoreWidget.pCoreCount / 2
+		eCorePerDie := cpuCoreWidget.eCoreCount / 2
+
+		var pcoreSum, ecoreSum float64
+		for die := 0; die < 2; die++ {
+			pCoreStart := die * (pCorePerDie + eCorePerDie)
+			eCoreStart := pCoreStart + pCorePerDie
+
+			for i := 0; i < pCorePerDie; i++ {
+				pcoreSum += coreUsages[pCoreStart+i]
+			}
+			for i := 0; i < eCorePerDie; i++ {
+				ecoreSum += coreUsages[eCoreStart+i]
+			}
 		}
-		ecoreAvg /= float64(cpuCoreWidget.eCoreCount)
-	}
-	if cpuCoreWidget.pCoreCount > 0 && len(coreUsages) >= cpuCoreWidget.eCoreCount+cpuCoreWidget.pCoreCount {
-		for i := cpuCoreWidget.eCoreCount; i < cpuCoreWidget.eCoreCount+cpuCoreWidget.pCoreCount; i++ {
-			pcoreAvg += coreUsages[i]
+		pcoreAvg = pcoreSum / float64(cpuCoreWidget.pCoreCount)
+		ecoreAvg = ecoreSum / float64(cpuCoreWidget.eCoreCount)
+	} else {
+		// Non-interleaved topology: all P-cores first, then all E-cores
+		// This applies to: non-Ultra chips AND M3 Ultra (which is non-interleaved despite being Ultra)
+		pCoreStart := 0
+		eCoreStart := cpuCoreWidget.pCoreCount
+
+		for i := 0; i < cpuCoreWidget.pCoreCount; i++ {
+			pcoreAvg += coreUsages[pCoreStart+i]
 		}
 		pcoreAvg /= float64(cpuCoreWidget.pCoreCount)
+
+		for i := 0; i < cpuCoreWidget.eCoreCount; i++ {
+			ecoreAvg += coreUsages[eCoreStart+i]
+		}
+		ecoreAvg /= float64(cpuCoreWidget.eCoreCount)
 	}
 
 	thermalStateVal, _ := getThermalStateString()
@@ -1385,12 +1408,22 @@ func getSOCInfo() SystemInfo {
 	if gpuCoreCount == 0 && gpuCoreCountStr != "?" {
 	}
 
+	brandString := cpuInfoDict["machdep.cpu.brand_string"]
+	isUltra := strings.Contains(brandString, "Ultra")
+
+	isInterleaved := false
+	if isUltra {
+		isInterleaved = strings.Contains(brandString, "M1") || strings.Contains(brandString, "M2")
+	}
+
 	return SystemInfo{
-		Name:         cpuInfoDict["machdep.cpu.brand_string"],
-		CoreCount:    coreCount,
-		ECoreCount:   eCoreCounts,
-		PCoreCount:   pCoreCounts,
-		GPUCoreCount: gpuCoreCount,
+		Name:          brandString,
+		CoreCount:     coreCount,
+		ECoreCount:    eCoreCounts,
+		PCoreCount:    pCoreCounts,
+		GPUCoreCount:  gpuCoreCount,
+		IsUltra:       isUltra,
+		IsInterleaved: isInterleaved,
 	}
 }
 

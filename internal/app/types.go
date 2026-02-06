@@ -27,11 +27,13 @@ type CPUMetrics struct {
 }
 
 type SystemInfo struct {
-	Name         string `json:"name"`
-	CoreCount    int    `json:"core_count"`
-	ECoreCount   int    `json:"e_core_count"`
-	PCoreCount   int    `json:"p_core_count"`
-	GPUCoreCount int    `json:"gpu_core_count"`
+	Name          string `json:"name"`
+	CoreCount     int    `json:"core_count"`
+	ECoreCount    int    `json:"e_core_count"`
+	PCoreCount    int    `json:"p_core_count"`
+	GPUCoreCount  int    `json:"gpu_core_count"`
+	IsUltra       bool   `json:"is_ultra"`
+	IsInterleaved bool   `json:"is_interleaved"`
 }
 
 type NetDiskMetrics struct {
@@ -80,6 +82,8 @@ type CPUCoreWidget struct {
 	labels                 []string
 	eCoreCount, pCoreCount int
 	modelName              string
+	IsUltra                bool
+	IsInterleaved          bool
 }
 
 func NewEventThrottler(gracePeriod time.Duration) *EventThrottler {
@@ -127,12 +131,14 @@ func NewCPUCoreWidget(modelInfo SystemInfo) *CPUCoreWidget {
 	}
 
 	return &CPUCoreWidget{
-		Block:      ui.NewBlock(),
-		cores:      make([]float64, totalCores),
-		labels:     labels,
-		eCoreCount: eCoreCount,
-		pCoreCount: pCoreCount,
-		modelName:  modelName,
+		Block:         ui.NewBlock(),
+		cores:         make([]float64, totalCores),
+		labels:        labels,
+		eCoreCount:    eCoreCount,
+		pCoreCount:    pCoreCount,
+		modelName:     modelName,
+		IsUltra:       modelInfo.IsUltra,
+		IsInterleaved: modelInfo.IsInterleaved,
 	}
 }
 
