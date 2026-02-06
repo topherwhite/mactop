@@ -88,14 +88,6 @@ var (
 			Help: "Current GPU frequency in MHz",
 		},
 	)
-	powerUsage = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "mactop_power_watts",
-			Help: "Current power usage in watts",
-		},
-		[]string{"component"},
-	)
-
 	socTemp = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "mactop_soc_temp_celsius",
@@ -103,7 +95,7 @@ var (
 		},
 	)
 	gpuTemp = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "mactop_gpu_temperature_celsius",
+		Name: "mactop_gpu_temp_celsius",
 		Help: "Current GPU temperature in Celsius",
 	})
 	thermalState = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -136,11 +128,4 @@ var (
 		[]string{"operation"},
 	)
 
-	diskIOPS = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "mactop_disk_iops",
-			Help: "Disk I/O operations per second",
-		},
-		[]string{"operation"},
-	)
 )

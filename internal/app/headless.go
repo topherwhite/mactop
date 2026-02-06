@@ -128,15 +128,6 @@ func runHeadless(count int) {
 			pcoreUsage.Set(pcoreAvg)
 			gpuUsage.Set(m.GPUActive)
 			gpuFreqMHz.Set(float64(m.GPUFreqMHz))
-
-			powerUsage.With(prometheus.Labels{"component": "cpu"}).Set(m.CPUPower)
-			powerUsage.With(prometheus.Labels{"component": "gpu"}).Set(m.GPUPower)
-			powerUsage.With(prometheus.Labels{"component": "ane"}).Set(m.ANEPower)
-			powerUsage.With(prometheus.Labels{"component": "dram"}).Set(m.DRAMPower)
-			powerUsage.With(prometheus.Labels{"component": "gpu_sram"}).Set(m.GPUSRAMPower)
-			powerUsage.With(prometheus.Labels{"component": "system"}).Set(m.SystemPower)
-			powerUsage.With(prometheus.Labels{"component": "total"}).Set(m.TotalPower)
-
 			socTemp.Set(float64(m.CPUTemp))
 			gpuTemp.Set(float64(m.GPUTemp))
 
@@ -160,8 +151,6 @@ func runHeadless(count int) {
 			networkSpeed.With(prometheus.Labels{"direction": "download"}).Set(netDisk.InBytesPerSec)
 			diskIOSpeed.With(prometheus.Labels{"operation": "read"}).Set(netDisk.ReadKBytesPerSec)
 			diskIOSpeed.With(prometheus.Labels{"operation": "write"}).Set(netDisk.WriteKBytesPerSec)
-			diskIOPS.With(prometheus.Labels{"operation": "read"}).Set(netDisk.ReadOpsPerSec)
-			diskIOPS.With(prometheus.Labels{"operation": "write"}).Set(netDisk.WriteOpsPerSec)
 		}
 
 		if samplesCollected > 0 && count > 0 {

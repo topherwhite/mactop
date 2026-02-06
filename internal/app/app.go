@@ -39,14 +39,12 @@ func startPrometheusServer(port string) {
 	registry.MustRegister(pcoreUsage)
 	registry.MustRegister(gpuUsage)
 	registry.MustRegister(gpuFreqMHz)
-	registry.MustRegister(powerUsage)
 	registry.MustRegister(socTemp)
 	registry.MustRegister(gpuTemp)
 	registry.MustRegister(thermalState)
 	registry.MustRegister(memoryUsage)
 	registry.MustRegister(networkSpeed)
 	registry.MustRegister(diskIOSpeed)
-	registry.MustRegister(diskIOPS)
 
 	handler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
 
@@ -1220,13 +1218,6 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	cpuUsage.Set(totalUsage)
 	ecoreUsage.Set(ecoreAvg)
 	pcoreUsage.Set(pcoreAvg)
-	powerUsage.With(prometheus.Labels{"component": "cpu"}).Set(cpuMetrics.CPUW)
-	powerUsage.With(prometheus.Labels{"component": "gpu"}).Set(cpuMetrics.GPUW)
-	powerUsage.With(prometheus.Labels{"component": "ane"}).Set(cpuMetrics.ANEW)
-	powerUsage.With(prometheus.Labels{"component": "dram"}).Set(cpuMetrics.DRAMW)
-	powerUsage.With(prometheus.Labels{"component": "gpu_sram"}).Set(cpuMetrics.GPUSRAMW)
-	powerUsage.With(prometheus.Labels{"component": "system"}).Set(cpuMetrics.SystemW)
-	powerUsage.With(prometheus.Labels{"component": "total"}).Set(cpuMetrics.PackageW)
 	socTemp.Set(cpuMetrics.CPUTemp)
 	gpuTemp.Set(cpuMetrics.GPUTemp)
 	thermalState.Set(float64(thermalStateNum))
@@ -1364,8 +1355,6 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 	networkSpeed.With(prometheus.Labels{"direction": "download"}).Set(netdiskMetrics.InBytesPerSec)
 	diskIOSpeed.With(prometheus.Labels{"operation": "read"}).Set(netdiskMetrics.ReadKBytesPerSec)
 	diskIOSpeed.With(prometheus.Labels{"operation": "write"}).Set(netdiskMetrics.WriteKBytesPerSec)
-	diskIOPS.With(prometheus.Labels{"operation": "read"}).Set(netdiskMetrics.ReadOpsPerSec)
-	diskIOPS.With(prometheus.Labels{"operation": "write"}).Set(netdiskMetrics.WriteOpsPerSec)
 }
 
 func max(nums ...int) int {
