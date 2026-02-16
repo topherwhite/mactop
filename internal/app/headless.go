@@ -45,6 +45,14 @@ func runHeadless(count int) {
 
 	encoder := json.NewEncoder(os.Stdout)
 
+	// Cache static hardware info — these shell out to sysctl/system_profiler
+	// and never change at runtime.
+	sysInfo := getSOCInfo()
+	var topology CoreTopology
+	if prometheusPort != "" {
+		topology = GetCoreTopology(sysInfo)
+	}
+
 	GetCPUPercentages()
 
 	if count > 0 {
@@ -81,8 +89,6 @@ func runHeadless(count int) {
 		m.SystemPower = residualSystem
 		m.TotalPower = totalPower
 
-		sysInfo := getSOCInfo()
-
 		output := HeadlessOutput{
 			Timestamp:    time.Now().Format(time.RFC3339),
 			SocMetrics:   m,
@@ -99,8 +105,7 @@ func runHeadless(count int) {
 
 		// Update Prometheus metrics
 		if prometheusPort != "" && len(percentages) > 0 {
-			// Use topology-aware core mapping
-			topology := GetCoreTopology(sysInfo)
+			// Use cached topology-aware core mapping
 
 			var ecoreAvg, pcoreAvg float64
 			if len(topology.PCoreIndices) > 0 {
